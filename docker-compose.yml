@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DB_HOST=192.168.0.15
+      - DB_PORT=5432
+      - DB_NAME=cyberx
+      - DB_USER=cyberex
+      - DB_PASSWORD=cyber123
+      - JWT_SECRET=your-super-secret-jwt-key-change-this-in-production-2024
+      - JWT_EXPIRES_IN=24h
+      - SWAGGER_SECRET=cyberx-swagger-access-secret-2024
+      - JWT_SWAGGER_SECRET=cyberx-swagger-jwt-secret-2024
+
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - cyberx-network
+
+networks:
+  cyberx-network:
+    driver: bridge

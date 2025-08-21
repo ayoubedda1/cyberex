@@ -1,0 +1,145 @@
+stages:
+  - test
+  - build
+  - update-infra
+
+variables:
+  DOCKER_IMAGE: $CI_REGISTRY_IMAGE
+  IMAGE_TAG: $CI_COMMIT_SHORT_SHA
+  INFRA_REPO: git@192.168.0.2:cyber-group/k8s-infra.git
+  DEPLOYMENT_FILE: backend-cyberx/deployment.yaml
+  NODE_VERSION: "18"
+
+build:
+  stage: build
+  tags:
+    - cyberex-backend
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" "$CI_REGISTRY" --password-stdin
+  script:
+    - docker build -t $DOCKER_IMAGE:$IMAGE_TAG .
+    - docker push $DOCKER_IMAGE:$IMAGE_TAG
+  only:
+    - main
+
+# Unit Tests with Coverage (Non-blocking)
+test:unit:
+  stage: test
+  tags:
+    - cyberex-backend
+  before_script:
+    - echo "Setting up Node.js environment..."
+    - node --version
+    - npm --version
+    - npm ci
+  script:
+    - echo "Running unit tests with coverage..."
+    - npm run test:unit:coverage
+    - echo "Unit tests completed successfully"
+  artifacts:
+    paths:
+      - coverage/
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura-coverage.xml
+    expire_in: 1 week
+  coverage: '/All files[^|]*\|[^|]*\|[^|]*\|[^|]*\|[^|]*\s+(\d+)/'
+  allow_failure: true  # Won't block pipeline
+  only:
+    - main
+    - merge_requests
+
+# Security Tests with Coverage (Non-blocking)
+test:security:
+  stage: test
+  tags:
+    - cyberex-backend
+  before_script:
+    - echo "Setting up Node.js environment..."
+    - node --version
+    - npm --version
+    - npm ci
+  script:
+    - echo "Running security tests with coverage..."
+    - npm run test:security:coverage
+    - echo "Security tests completed successfully"
+  artifacts:
+    paths:
+      - coverage/
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura-coverage.xml
+    expire_in: 1 week
+  coverage: '/All files[^|]*\|[^|]*\|[^|]*\|[^|]*\|[^|]*\s+(\d+)/'
+  allow_failure: true  # Won't block pipeline
+  only:
+    - main
+    - merge_requests
+
+# Full Test Suite with Coverage (Non-blocking)
+test:full:
+  stage: test
+  tags:
+    - cyberex-backend
+  before_script:
+    - echo "Setting up Node.js environment..."
+    - node --version
+    - npm --version
+    - npm ci
+  script:
+    - echo "Running full test suite with coverage..."
+    - npm run test:coverage
+    - echo "Full test suite completed successfully"
+  artifacts:
+    paths:
+      - coverage/
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura-coverage.xml
+    expire_in: 1 week
+  coverage: '/All files[^|]*\|[^|]*\|[^|]*\|[^|]*\|[^|]*\s+(\d+)/'
+  allow_failure: true  # Won't block pipeline
+  only:
+    - main
+    - merge_requests
+
+update-infra:
+  stage: update-infra
+  tags:
+    - cyberex-backend
+  before_script:
+    - echo "Checking required packages..."
+    - |
+      if ! which git; then
+        echo "ERROR: git is not installed"
+        exit 1
+      fi
+    - |
+      if ! which ssh; then
+        echo "ERROR: ssh is not installed"
+        exit 1
+      fi
+    - |
+      if ! which yq; then
+        echo "ERROR: yq is not installed"
+        exit 1
+      fi
+    - echo "All required packages are available"
+    - mkdir -p ~/.ssh
+    - echo "$GITLAB_SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan 192.168.0.2 >> ~/.ssh/known_hosts
+  script:
+    - git clone $INFRA_REPO
+    - cd k8s-infra
+    - yq e -i '.spec.template.spec.containers[0].image = "192.168.0.2:5050/cyber-group/cyberx-backend:" + strenv(IMAGE_TAG)' $DEPLOYMENT_FILE
+    - git config user.name "CI Bot"
+    - git config user.email "ci-bot@example.com"
+    - git add $DEPLOYMENT_FILE
+    - git commit -m "Update backend image to $IMAGE_TAG"
+    - git push origin main
+  only:
+    - main
