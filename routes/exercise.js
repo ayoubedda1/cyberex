@@ -1,14 +1,19 @@
+// routes/exercise.js - Enhanced with RBAC
 const express = require('express');
 const router = express.Router();
 const logger = require('../config/logger');
 const ExerciseService = require('../services/ExerciceServices');
+const { verifyJwtToken, requireAdmin, requireRole } = require('../middlewares/auth');
+
+// Apply authentication to all exercise routes
+router.use(verifyJwtToken);
 
 /**
  * @swagger
  * /api/exercises:
  *   get:
  *     summary: Get all exercises
- *     description: Retrieve all exercises from the database
+ *     description: Retrieve all exercises from the database. All authenticated users can view exercises.
  *     tags: [Exercises]
  *     security:
  *       - bearerAuth: []
@@ -23,6 +28,7 @@ router.get('/', async (req, res) => {
     logger.info('Exercises endpoint accessed', {
       ip: req.ip,
       userId: req.user?.userId,
+      userRoles: req.user?.roles,
       endpoint: '/api/exercises',
       method: 'GET'
     });
@@ -53,7 +59,7 @@ router.get('/', async (req, res) => {
  * /api/exercises/{id}:
  *   get:
  *     summary: Get exercise by ID
- *     description: Retrieve a specific exercise by its ID
+ *     description: Retrieve a specific exercise by its ID. All authenticated users can view exercises.
  *     tags: [Exercises]
  *     security:
  *       - bearerAuth: []
@@ -81,6 +87,7 @@ router.get('/:id', async (req, res) => {
       exerciseId: id,
       ip: req.ip,
       userId: req.user?.userId,
+      userRoles: req.user?.roles,
       endpoint: `/api/exercises/${id}`,
       method: 'GET'
     });
@@ -115,8 +122,8 @@ router.get('/:id', async (req, res) => {
  * @swagger
  * /api/exercises:
  *   post:
- *     summary: Create new exercise
- *     description: Create a new exercise in the database
+ *     summary: Create new exercise (Admin only)
+ *     description: Create a new exercise in the database. Only administrators can create exercises.
  *     tags: [Exercises]
  *     security:
  *       - bearerAuth: []
@@ -153,24 +160,29 @@ router.get('/:id', async (req, res) => {
  *         description: Bad request - validation error
  *       401:
  *         description: Unauthorized - JWT token required
+ *       403:
+ *         description: Forbidden - Admin privileges required
  */
-router.post('/', async (req, res) => {
+router.post('/', requireAdmin, async (req, res) => {
   try {
     const exerciseData = req.body;
 
-    logger.info('Create exercise endpoint accessed', {
+    logger.info('Admin create exercise endpoint accessed', {
       ip: req.ip,
-      userId: req.user?.userId,
+      adminUserId: req.user?.userId,
+      userRoles: req.user?.roles,
       endpoint: '/api/exercises',
-      method: 'POST'
+      method: 'POST',
+      exerciseName: exerciseData.name
     });
 
     const result = await ExerciseService.createExercise(exerciseData);
 
-    logger.info('Exercise created successfully', {
+    logger.info('Exercise created successfully by admin', {
       ip: req.ip,
-      userId: req.user?.userId,
-      exerciseId: result.data.id
+      adminUserId: req.user?.userId,
+      exerciseId: result.data.id,
+      exerciseName: result.data.name
     });
 
     res.status(201).json({
@@ -181,7 +193,7 @@ router.post('/', async (req, res) => {
     logger.error('Error creating exercise', {
       error: error.message,
       ip: req.ip,
-      userId: req.user?.userId
+      adminUserId: req.user?.userId
     });
 
     if (error.message.includes('validation') || error.message.includes('required') ||
@@ -205,8 +217,8 @@ router.post('/', async (req, res) => {
  * @swagger
  * /api/exercises/{id}:
  *   put:
- *     summary: Update exercise
- *     description: Update an existing exercise by ID
+ *     summary: Update exercise (Admin only)
+ *     description: Update an existing exercise by ID. Only administrators can update exercises.
  *     tags: [Exercises]
  *     security:
  *       - bearerAuth: []
@@ -245,26 +257,31 @@ router.post('/', async (req, res) => {
  *         description: Exercise not found
  *       401:
  *         description: Unauthorized - JWT token required
+ *       403:
+ *         description: Forbidden - Admin privileges required
  */
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
 
-    logger.info('Update exercise endpoint accessed', {
+    logger.info('Admin update exercise endpoint accessed', {
       exerciseId: id,
       ip: req.ip,
-      userId: req.user?.userId,
+      adminUserId: req.user?.userId,
+      userRoles: req.user?.roles,
       endpoint: `/api/exercises/${id}`,
-      method: 'PUT'
+      method: 'PUT',
+      updateFields: Object.keys(updateData)
     });
 
     const result = await ExerciseService.updateExercise(id, updateData);
 
-    logger.info('Exercise updated successfully', {
+    logger.info('Exercise updated successfully by admin', {
       ip: req.ip,
-      userId: req.user?.userId,
-      exerciseId: id
+      adminUserId: req.user?.userId,
+      exerciseId: id,
+      updatedFields: Object.keys(updateData)
     });
 
     res.json({
@@ -276,7 +293,7 @@ router.put('/:id', async (req, res) => {
       error: error.message,
       exerciseId: req.params.id,
       ip: req.ip,
-      userId: req.user?.userId
+      adminUserId: req.user?.userId
     });
 
     if (error.message.includes('non trouvé')) {
@@ -305,10 +322,10 @@ router.put('/:id', async (req, res) => {
 
 /**
  * @swagger
- * /api/exercises/{id}:
- *   delete:
- *     summary: Delete exercise
- *     description: Delete an exercise by ID (soft delete - marks as deleted but preserves data)
+ * /api/exercises/{id}/activate:
+ *   patch:
+ *     summary: Activate exercise (Admin only)
+ *     description: Activate an exercise by setting its status to active. Only administrators can activate exercises.
  *     tags: [Exercises]
  *     security:
  *       - bearerAuth: []
@@ -322,21 +339,180 @@ router.put('/:id', async (req, res) => {
  *         description: Exercise ID
  *     responses:
  *       200:
+ *         description: Exercise activated successfully
+ *       404:
+ *         description: Exercise not found
+ *       401:
+ *         description: Unauthorized - JWT token required
+ *       403:
+ *         description: Forbidden - Admin privileges required
+ */
+router.patch('/:id/activate', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    logger.info('Admin activate exercise endpoint accessed', {
+      exerciseId: id,
+      ip: req.ip,
+      adminUserId: req.user?.userId,
+      endpoint: `/api/exercises/${id}/activate`,
+      method: 'PATCH'
+    });
+
+    const result = await ExerciseService.activateExercise(id);
+
+    logger.info('Exercise activated successfully by admin', {
+      ip: req.ip,
+      adminUserId: req.user?.userId,
+      exerciseId: id
+    });
+
+    res.json({
+      ...result,
+      message: 'Exercise activated successfully'
+    });
+  } catch (error) {
+    logger.error('Error activating exercise', {
+      error: error.message,
+      exerciseId: req.params.id,
+      ip: req.ip,
+      adminUserId: req.user?.userId
+    });
+
+    if (error.message.includes('non trouvé') || error.message.includes('not found')) {
+      return res.status(404).json({
+        success: false,
+        error: 'Exercise not found',
+        message: 'No exercise found with the specified ID'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: 'Internal Server Error',
+      message: 'An error occurred while activating the exercise'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/exercises/{id}/close:
+ *   patch:
+ *     summary: Close exercise (Admin only)
+ *     description: Close an exercise by setting its status to closed. Only administrators can close exercises.
+ *     tags: [Exercises]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Exercise ID
+ *     responses:
+ *       200:
+ *         description: Exercise closed successfully
+ *       404:
+ *         description: Exercise not found
+ *       401:
+ *         description: Unauthorized - JWT token required
+ *       403:
+ *         description: Forbidden - Admin privileges required
+ */
+router.patch('/:id/close', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    logger.info('Admin close exercise endpoint accessed', {
+      exerciseId: id,
+      ip: req.ip,
+      adminUserId: req.user?.userId,
+      endpoint: `/api/exercises/${id}/close`,
+      method: 'PATCH'
+    });
+
+    const result = await ExerciseService.closeExercise(id);
+
+    logger.info('Exercise closed successfully by admin', {
+      ip: req.ip,
+      adminUserId: req.user?.userId,
+      exerciseId: id
+    });
+
+    res.json({
+      ...result,
+      message: 'Exercise closed successfully'
+    });
+  } catch (error) {
+    logger.error('Error closing exercise', {
+      error: error.message,
+      exerciseId: req.params.id,
+      ip: req.ip,
+      adminUserId: req.user?.userId
+    });
+
+    if (error.message.includes('non trouvé') || error.message.includes('not found')) {
+      return res.status(404).json({
+        success: false,
+        error: 'Exercise not found',
+        message: 'No exercise found with the specified ID'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: 'Internal Server Error',
+      message: 'An error occurred while closing the exercise'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/exercises/{id}:
+ *   delete:
+ *     summary: Delete exercise (Admin only)
+ *     description: Delete an exercise by ID (soft delete - marks as deleted but preserves data). Only administrators can delete exercises.
+ *     tags: [Exercises]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Exercise ID
+ *       - in: query
+ *         name: permanent
+ *         schema:
+ *           type: boolean
+ *           default: false
+ *         description: Whether to permanently delete the exercise
+ *     responses:
+ *       200:
  *         description: Exercise deleted successfully
  *       404:
  *         description: Exercise not found
  *       401:
  *         description: Unauthorized - JWT token required
+ *       403:
+ *         description: Forbidden - Admin privileges required
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const permanent = req.query.permanent === 'true';
 
-    logger.info('Delete exercise endpoint accessed', {
+    logger.info('Admin delete exercise endpoint accessed', {
       exerciseId: id,
       ip: req.ip,
-      userId: req.user?.userId,
+      adminUserId: req.user?.userId,
+      userRoles: req.user?.roles,
       endpoint: `/api/exercises/${id}`,
       method: 'DELETE',
       permanent
@@ -344,9 +520,9 @@ router.delete('/:id', async (req, res) => {
 
     const result = await ExerciseService.deleteExercise(id, permanent);
 
-    logger.info('Exercise deleted successfully', {
+    logger.info('Exercise deleted successfully by admin', {
       ip: req.ip,
-      userId: req.user?.userId,
+      adminUserId: req.user?.userId,
       exerciseId: id,
       permanent
     });
@@ -357,7 +533,7 @@ router.delete('/:id', async (req, res) => {
       error: error.message,
       exerciseId: req.params.id,
       ip: req.ip,
-      userId: req.user?.userId
+      adminUserId: req.user?.userId
     });
 
     if (error.message.includes('non trouvé')) {
@@ -380,8 +556,8 @@ router.delete('/:id', async (req, res) => {
  * @swagger
  * /api/exercises/{id}/restore:
  *   patch:
- *     summary: Restore deleted exercise
- *     description: Restore a soft-deleted exercise
+ *     summary: Restore deleted exercise (Admin only)
+ *     description: Restore a soft-deleted exercise. Only administrators can restore exercises.
  *     tags: [Exercises]
  *     security:
  *       - bearerAuth: []
@@ -400,24 +576,26 @@ router.delete('/:id', async (req, res) => {
  *         description: Exercise not found
  *       401:
  *         description: Unauthorized - JWT token required
+ *       403:
+ *         description: Forbidden - Admin privileges required
  */
-router.patch('/:id/restore', async (req, res) => {
+router.patch('/:id/restore', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 
-    logger.info('Restore exercise endpoint accessed', {
+    logger.info('Admin restore exercise endpoint accessed', {
       exerciseId: id,
       ip: req.ip,
-      userId: req.user?.userId,
+      adminUserId: req.user?.userId,
       endpoint: `/api/exercises/${id}/restore`,
       method: 'PATCH'
     });
 
     const result = await ExerciseService.restoreExercise(id);
 
-    logger.info('Exercise restored successfully', {
+    logger.info('Exercise restored successfully by admin', {
       ip: req.ip,
-      userId: req.user?.userId,
+      adminUserId: req.user?.userId,
       exerciseId: id
     });
 
@@ -430,7 +608,7 @@ router.patch('/:id/restore', async (req, res) => {
       error: error.message,
       exerciseId: req.params.id,
       ip: req.ip,
-      userId: req.user?.userId
+      adminUserId: req.user?.userId
     });
 
     if (error.message.includes('non trouvé') || error.message.includes('not found')) {

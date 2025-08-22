@@ -1,14 +1,20 @@
+// routes/user.js - Enhanced with RBAC
 const express = require('express');
 const router = express.Router();
 const logger = require('../config/logger');
 const UserService = require('../services/userservices');
+const UserRoleService = require('../services/UserRoleServices');
+const { verifyJwtToken, requireAdmin, canModifyUser, preventSelfPrivilegeEscalation } = require('../middlewares/auth');
+
+// Apply authentication to all user routes
+router.use(verifyJwtToken);
 
 /**
  * @swagger
  * /api/users:
  *   get:
- *     summary: Get all users
- *     description: Retrieve all users from the database with optional pagination and filters
+ *     summary: Get all users (Admin only)
+ *     description: Retrieve all users from the database with optional pagination and filters. Only administrators can view all users.
  *     tags: [Users]
  *     security:
  *       - bearerAuth: []
@@ -43,8 +49,10 @@ const UserService = require('../services/userservices');
  *         description: List of users retrieved successfully
  *       401:
  *         description: Unauthorized - JWT token required
+ *       403:
+ *         description: Forbidden - Admin privileges required
  */
-router.get('/', async (req, res) => {
+router.get('/', requireAdmin, async (req, res) => {
   try {
     const { page, limit, search, isActive } = req.query;
     
@@ -55,9 +63,10 @@ router.get('/', async (req, res) => {
       isActive: isActive !== undefined ? isActive === 'true' : null
     };
 
-    logger.info('Users endpoint accessed', {
+    logger.info('Admin users endpoint accessed', {
       ip: req.ip,
-      userId: req.user?.userId,
+      adminUserId: req.user?.userId,
+      userRoles: req.user?.roles,
       endpoint: '/api/users',
       method: 'GET',
       options
@@ -190,7 +199,7 @@ router.get('/:id', async (req, res) => {
  *       401:
  *         description: Unauthorized - JWT token required
  */
-router.post('/', async (req, res) => {
+router.post('/', requireAdmin, async (req, res) => {
   try {
     const userData = req.body;
     
@@ -287,7 +296,7 @@ router.post('/', async (req, res) => {
  *       401:
  *         description: Unauthorized - JWT token required
  */
-router.put('/:id', async (req, res) => {
+router.put('/:id', canModifyUser, preventSelfPrivilegeEscalation, async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
@@ -370,7 +379,7 @@ router.put('/:id', async (req, res) => {
  *       401:
  *         description: Unauthorized - JWT token required
  */
-router.patch('/:id/activate', async (req, res) => {
+router.patch('/:id/activate', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -443,7 +452,7 @@ router.patch('/:id/activate', async (req, res) => {
  *       401:
  *         description: Unauthorized - JWT token required
  */
-router.patch('/:id/deactivate', async (req, res) => {
+router.patch('/:id/deactivate', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -532,7 +541,7 @@ router.patch('/:id/deactivate', async (req, res) => {
  *       401:
  *         description: Unauthorized - JWT token required
  */
-router.patch('/:id/password', async (req, res) => {
+router.patch('/:id/password', canModifyUser, async (req, res) => {
   try {
     const { id } = req.params;
     const { newPassword } = req.body;
@@ -620,7 +629,7 @@ router.patch('/:id/password', async (req, res) => {
  *       401:
  *         description: Unauthorized - JWT token required
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const permanent = req.query.permanent === 'true';
@@ -693,7 +702,7 @@ router.delete('/:id', async (req, res) => {
  *       401:
  *         description: Unauthorized - JWT token required
  */
-router.patch('/:id/restore', async (req, res) => {
+router.patch('/:id/restore', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -742,3 +751,132 @@ router.patch('/:id/restore', async (req, res) => {
 });
 
 module.exports = router;
+/**
+ * Assignment endpoints (Admin only)
+ * - Assign a role to a user
+ * - Revoke a role from a user
+ */
+
+/**
+ * @swagger
+ * /api/users/{id}/roles:
+ *   post:
+ *     summary: Assign role to user (Admin only)
+ *     description: Assign a role to a user with optional metadata
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: User ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - roleId
+ *             properties:
+ *               roleId:
+ *                 type: string
+ *                 format: uuid
+ *               expiresAt:
+ *                 type: string
+ *                 format: date-time
+ *               notes:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Role assigned successfully
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden - Admin required
+ */
+router.post('/:id/roles', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { roleId, expiresAt, notes } = req.body || {};
+
+    if (!roleId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation Error',
+        message: 'roleId is required'
+      });
+    }
+
+    const result = await UserRoleService.assignRole(id, roleId, {
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+      notes: notes || null
+    });
+
+    return res.json({
+      ...result,
+      message: 'Role assigned successfully'
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      error: 'Bad Request',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/users/{id}/roles/{roleId}:
+ *   delete:
+ *     summary: Revoke role from user (Admin only)
+ *     description: Revoke an active role assignment from a user
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: User ID
+ *       - in: path
+ *         name: roleId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Role ID
+ *     responses:
+ *       200:
+ *         description: Role revoked successfully
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden - Admin required
+ *       404:
+ *         description: Assignment not found
+ */
+router.delete('/:id/roles/:roleId', requireAdmin, async (req, res) => {
+  try {
+    const { id, roleId } = req.params;
+    const result = await UserRoleService.revokeRole(id, roleId);
+    return res.json(result);
+  } catch (error) {
+    const status = error.message.includes('not found') ? 404 : 400;
+    return res.status(status).json({
+      success: false,
+      error: status === 404 ? 'Not Found' : 'Bad Request',
+      message: error.message
+    });
+  }
+});

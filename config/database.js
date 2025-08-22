@@ -5,7 +5,7 @@ const env = process.env.NODE_ENV || 'development';
 
 const databaseConfig = {
   development: {
-    host: process.env.DB_HOST || '192.168.0.15',
+    host: process.env.DB_HOST || 'localhost',
     port: process.env.DB_PORT || 5432,
     database: process.env.DB_NAME || 'cyberx',
     username: process.env.DB_USER || 'cyberex',
@@ -97,10 +97,28 @@ async function closeConnection() {
   }
 }
 
+// Ensure case-insensitive unique index on roles.name (Postgres only)
+async function ensureRoleNameLowerUniqueIndex() {
+  try {
+    if (sequelize.getDialect() !== 'postgres') {
+      return;
+    }
+    // Idempotent index creation on expression lower(name)
+    await sequelize.query(
+      'CREATE UNIQUE INDEX IF NOT EXISTS roles_name_lower_unique ON roles ((lower(name)));'
+    );
+    return true;
+  } catch (error) {
+    console.error('❌ Failed ensuring roles lower(name) unique index:', error.message);
+    return false;
+  }
+}
+
 module.exports = {
   sequelize,
   config: databaseConfig,
   testConnection,
   syncDatabase,
-  closeConnection
+  closeConnection,
+  ensureRoleNameLowerUniqueIndex
 };

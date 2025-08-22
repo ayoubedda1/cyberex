@@ -35,7 +35,7 @@ const swaggerLimiter = rateLimit({
 // Import configurations
 const logger = require('./config/logger');
 const swaggerSpecs = require('./config/swagger');
-const { testConnection, syncDatabase } = require('./config/database');
+const { testConnection, syncDatabase, ensureRoleNameLowerUniqueIndex } = require('./config/database');
 
 // Import middleware
 const { verifyJwtToken, verifySwaggerToken } = require('./middlewares/auth');
@@ -205,6 +205,7 @@ app.listen(PORT, async () => {
     const connected = await testConnection();
     if (connected) {
       await syncDatabase(false); // Don't force sync in production
+      await ensureRoleNameLowerUniqueIndex();
       console.log(`✅ Database connected and synchronized successfully!`);
     }
   } catch (error) {

@@ -183,9 +183,8 @@ global.testUtils = {
           const role = createdRoles[roleName];
           if (role) {
             await UserRole.create({
-              userId: user.id,
-              roleId: role.id,
-              assignedBy: null // Self-assigned during seeding
+              user_id: user.id,
+              role_id: role.id
             });
           }
         }

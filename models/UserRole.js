@@ -25,14 +25,6 @@ module.exports = (sequelize) => {
       allowNull: false,
       defaultValue: DataTypes.NOW
     },
-    assignedBy: {
-      type: DataTypes.UUID,
-      allowNull: true,
-      references: {
-        model: 'users',
-        key: 'id'
-      }
-    },
     isActive: {
       type: DataTypes.BOOLEAN,
       defaultValue: true,
@@ -56,7 +48,7 @@ module.exports = (sequelize) => {
   // CREATE Methods
   UserRole.assignRole = async function(userId, roleId, options = {}) {
     try {
-      const { assignedBy = null, expiresAt = null, notes = null } = options;
+      const { expiresAt = null, notes = null } = options;
 
       // Check if user exists and is active
       const user = await sequelize.models.User.findOne({
@@ -86,7 +78,6 @@ module.exports = (sequelize) => {
           return await existing.update({
             isActive: true,
             assigned_at: new Date(),
-            assignedBy,
             expiresAt,
             notes
           });
@@ -97,7 +88,6 @@ module.exports = (sequelize) => {
         user_id: userId,
         role_id: roleId,
         assigned_at: new Date(),
-        assignedBy,
         expiresAt,
         notes,
         isActive: true
@@ -109,7 +99,7 @@ module.exports = (sequelize) => {
 
   UserRole.assignRoleToUsers = async function(userIds, roleId, options = {}) {
     try {
-      const { assignedBy = null, expiresAt = null, notes = null } = options;
+      const { expiresAt = null, notes = null } = options;
 
       // Check if role exists and is active
       const role = await sequelize.models.Role.findOne({
@@ -144,7 +134,6 @@ module.exports = (sequelize) => {
         user_id: userId,
         role_id: roleId,
         assigned_at: new Date(),
-        assignedBy,
         expiresAt,
         notes,
         isActive: true

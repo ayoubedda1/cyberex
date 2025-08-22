@@ -30,7 +30,24 @@ module.exports = (sequelize) => {
   }, {
     tableName: 'roles',
     timestamps: true,
-    paranoid: true
+    paranoid: true,
+    hooks: {
+      beforeValidate: (role) => {
+        if (role.name && typeof role.name === 'string') {
+          role.name = role.name.trim().toLowerCase();
+        }
+      },
+      beforeCreate: (role) => {
+        if (role.name && typeof role.name === 'string') {
+          role.name = role.name.trim().toLowerCase();
+        }
+      },
+      beforeUpdate: (role) => {
+        if (role.name && typeof role.name === 'string') {
+          role.name = role.name.trim().toLowerCase();
+        }
+      }
+    }
   });
 
   // ============ CRUD METHODS ============
@@ -39,9 +56,8 @@ module.exports = (sequelize) => {
   Role.createRole = async function(roleData) {
     try {
       return await this.create({
-        name: roleData.name.trim(),
+        name: roleData.name.trim().toLowerCase(),
         description: roleData.description ? roleData.description.trim() : null,
-        permissions: roleData.permissions || [],
         isActive: roleData.isActive !== undefined ? roleData.isActive : true
       });
     } catch (error) {
@@ -53,7 +69,7 @@ module.exports = (sequelize) => {
   Role.findByName = function(name) {
     return this.findOne({ 
       where: { 
-        name: name.trim(),
+        name: name.trim().toLowerCase(),
         isActive: true 
       } 
     });
@@ -87,7 +103,7 @@ module.exports = (sequelize) => {
 
       const processedData = { ...updateData };
       if (processedData.name) {
-        processedData.name = processedData.name.trim();
+        processedData.name = processedData.name.trim().toLowerCase();
       }
       if (processedData.description !== undefined) {
         processedData.description = processedData.description ? processedData.description.trim() : null;
